@@ -1,14 +1,16 @@
-# Hello Flutter App
+# hello_flutter
 
-This is a simple Flutter app that displays "Hello, Flutter!" on screen.
+A new Flutter project.
 
-## How to run
+## Getting Started
 
-1. Install Flutter from flutter.dev
-2. Clone this repository
-3. Run `flutter pub get`
-4. Run `flutter run`
+This project is a starting point for a Flutter application.
 
-## Screenshot
+A few resources to get you started if this is your first Flutter project:
 
-![App Screenshot](screenshot.png)
+- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
