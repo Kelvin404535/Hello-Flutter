@@ -1,0 +1,61 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Pending Approvals - Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; }
+        .navbar { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        .navbar a { color: white; text-decoration: none; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 20px; background: white; border-radius: 10px; }
+        h2 { margin-bottom: 20px; color: #1e293b; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #2c3e50; color: white; }
+        .approve { background: #10b981; color: white; padding: 5px 12px; text-decoration: none; border-radius: 5px; display: inline-block; }
+        .reject { background: #ef4444; color: white; padding: 5px 12px; text-decoration: none; border-radius: 5px; display: inline-block; margin-left: 5px; }
+        .approve:hover { background: #059669; }
+        .reject:hover { background: #dc2626; }
+        .back { background: #3b82f6; color: white; padding: 8px 16px; text-decoration: none; border-radius: 5px; display: inline-block; margin-bottom: 20px; }
+        .badge-pending { background: #f59e0b; color: white; padding: 3px 8px; border-radius: 20px; font-size: 11px; }
+        .no-data { text-align: center; padding: 40px; color: #64748b; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="nav-brand">👥 Admin Panel - Pending Approvals</div>
+        <a href="/dashboard">← Back to Dashboard</a>
+    </div>
+    <div class="container">
+        <a href="/dashboard" class="back">← Back to Dashboard</a>
+        <h2>Users Awaiting Approval</h2>
+        <p><strong>Total pending:</strong> {{ pending_users|length }}</p>
+        
+        {% if pending_users %}
+        <table>
+            <thead>
+                <tr><th>Name</th><th>Email</th><th>Phone</th><th>Preferred Username</th><th>Role</th><th>Registered</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                {% for user in pending_users %}
+                <tr>
+                    <td><strong>{{ user.full_name }}</strong></td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ user.phone or '-' }}</td>
+                    <td>{{ user.preferred_username }}</td>
+                    <td><span class="badge-pending">{{ user.requested_role }}</span></td>
+                    <td>{% if user.created_at %}{{ user.created_at[:10] }}{% else %}-{% endif %}</td>
+                    <td>
+                        <a href="/approve-user/{{ user.id }}" class="approve" onclick="return confirm('Approve this user? System will generate credentials and send email.')">✓ Approve</a>
+                        <a href="/reject-user/{{ user.id }}" class="reject" onclick="return confirm('Reject this user?')">✗ Reject</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="no-data">✅ No pending approvals. All users have been processed.</div>
+        {% endif %}
+    </div>
+</body>
+</html>

@@ -1,0 +1,460 @@
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, abort
+import sqlite3
+import hashlib
+import secrets
+import re
+from datetime import datetime, timedelta
+from functools import wraps
+import io
+import csv
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+
+# 2FA Libraries
+import pyotp
+import qrcode
+from io import BytesIO
+import base64
+
+app = Flask(__name__)
+
+# ========== SECURITY CONFIGURATION ==========
+app.secret_key = secrets.token_hex(32)
+app.config['SESSION_COOKIE_SECURE'] = False  # Set True for HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
+
+DB_PATH = 'instance/silo_management.db'
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# ========== 1. PASSWORD FUNCTIONS ==========
+def is_strong_password(password):
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters"
+    if not re.search(r'[A-Z]', password):
+        return False, "Need 1 uppercase letter"
+    if not re.search(r'[a-z]', password):
+        return False, "Need 1 lowercase letter"
+    if not re.search(r'[0-9]', password):
+        return False, "Need 1 number"
+    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+        return False, "Need 1 special character"
+    return True, "Strong password"
+
+def hash_password(password):
+    salt = "smart_silo_salt_2026"
+    return hashlib.sha256((password + salt).encode()).hexdigest()
+
+def verify_password(password, hashed):
+    salt = "smart_silo_salt_2026"
+    return hashlib.sha256((password + salt).encode()).hexdigest() == hashed
+
+# ========== 2. ACCOUNT LOCKOUT ==========
+failed_attempts = {}
+locked_accounts = {}
+
+def check_account_lockout(username):
+    if username in locked_accounts:
+        lock_time = locked_accounts[username]
+        if datetime.now() < lock_time:
+            return True, f"Account locked until {lock_time.strftime('%H:%M:%S')}"
+        else:
+            del locked_accounts[username]
+            del failed_attempts[username]
+    return False, None
+
+def record_failed_attempt(username):
+    if username in failed_attempts:
+        attempts = failed_attempts[username] + 1
+    else:
+        attempts = 1
+    failed_attempts[username] = attempts
+    if attempts >= 5:
+        locked_accounts[username] = datetime.now() + timedelta(minutes=15)
+
+def reset_failed_attempts(username):
+    if username in failed_attempts:
+        del failed_attempts[username]
+    if username in locked_accounts:
+        del locked_accounts[username]
+
+# ========== 3. RATE LIMITING ==========
+request_counts = {}
+
+def rate_limit(identifier, limit=10, window=60):
+    now = datetime.now().timestamp()
+    if identifier not in request_counts:
+        request_counts[identifier] = []
+    # Clean old requests
+    request_counts[identifier] = [t for t in request_counts[identifier] if t > now - window]
+    if len(request_counts[identifier]) >= limit:
+        return False
+    request_counts[identifier].append(now)
+    return True
+
+# ========== 4. CSRF PROTECTION ==========
+def generate_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+    return session['csrf_token']
+
+def csrf_protect(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.method == 'POST':
+            token = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
+            if not token or token != session.get('csrf_token'):
+                abort(403, 'CSRF token missing or invalid')
+        return f(*args, **kwargs)
+    return decorated
+
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=generate_csrf_token)
+
+# ========== 5. AUDIT LOGGING ==========
+def log_activity(user_id, action, details, ip_address=None):
+    try:
+        conn = get_db()
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                action TEXT,
+                details TEXT,
+                ip_address TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)',
+                    (user_id, action, details, ip_address))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Audit error: {e}")
+
+# ========== 6. 2FA FUNCTIONS ==========
+def init_2fa_table():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS user_2fa (
+            user_id INTEGER PRIMARY KEY,
+            secret TEXT,
+            enabled BOOLEAN DEFAULT 0,
+            backup_codes TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_2fa_table()
+
+def setup_2fa(user_id):
+    conn = get_db()
+    existing = conn.execute("SELECT * FROM user_2fa WHERE user_id = ?", (user_id,)).fetchone()
+    
+    secret = pyotp.random_base32()
+    
+    if existing:
+        conn.execute("UPDATE user_2fa SET secret = ?, enabled = 0 WHERE user_id = ?", (secret, user_id))
+    else:
+        conn.execute("INSERT INTO user_2fa (user_id, secret, enabled) VALUES (?, ?, 0)", (user_id, secret))
+    
+    user = conn.execute("SELECT username FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.commit()
+    conn.close()
+    
+    totp = pyotp.TOTP(secret)
+    uri = totp.provisioning_uri(user['username'], issuer_name="SmartSiloSystem")
+    
+    qr = qrcode.make(uri)
+    buffer = BytesIO()
+    qr.save(buffer, format="PNG")
+    qr_base64 = base64.b64encode(buffer.getvalue()).decode()
+    
+    backup_codes = [secrets.token_hex(4) for _ in range(5)]
+    conn = get_db()
+    conn.execute("UPDATE user_2fa SET backup_codes = ? WHERE user_id = ?", (','.join(backup_codes), user_id))
+    conn.commit()
+    conn.close()
+    
+    return {'secret': secret, 'qr_code': qr_base64, 'backup_codes': backup_codes}
+
+def verify_2fa(user_id, code):
+    conn = get_db()
+    user_2fa = conn.execute("SELECT secret, enabled, backup_codes FROM user_2fa WHERE user_id = ?", (user_id,)).fetchone()
+    conn.close()
+    
+    if not user_2fa or not user_2fa['enabled']:
+        return False
+    
+    # Check backup codes
+    if user_2fa['backup_codes']:
+        backup_codes = user_2fa['backup_codes'].split(',')
+        if code in backup_codes:
+            backup_codes.remove(code)
+            conn = get_db()
+            conn.execute("UPDATE user_2fa SET backup_codes = ? WHERE user_id = ?", (','.join(backup_codes), user_id))
+            conn.commit()
+            conn.close()
+            return True
+    
+    totp = pyotp.TOTP(user_2fa['secret'])
+    return totp.verify(code)
+
+def enable_2fa(user_id, code):
+    conn = get_db()
+    user_2fa = conn.execute("SELECT secret FROM user_2fa WHERE user_id = ?", (user_id,)).fetchone()
+    if not user_2fa:
+        conn.close()
+        return False
+    totp = pyotp.TOTP(user_2fa['secret'])
+    if totp.verify(code):
+        conn.execute("UPDATE user_2fa SET enabled = 1 WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return True
+    conn.close()
+    return False
+
+def disable_2fa(user_id):
+    conn = get_db()
+    conn.execute("UPDATE user_2fa SET enabled = 0, secret = NULL, backup_codes = NULL WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+# ========== DECORATORS ==========
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('requires_2fa', False):
+            return redirect(url_for('verify_2fa_page'))
+        return f(*args, **kwargs)
+    return decorated
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('role') != 'admin':
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated
+
+# ========== RISK CALCULATION ==========
+def calculate_risk(moisture, days_stored):
+    if moisture is None or moisture == 0:
+        return 'gray', 'No data entered'
+    if moisture > 14 or days_stored > 90:
+        return 'red', f'CRITICAL: {moisture}% moisture, {days_stored} days'
+    elif moisture > 12.5 or days_stored > 60:
+        return 'yellow', f'WARNING: {moisture}% moisture, {days_stored} days'
+    else:
+        return 'green', f'SAFE: {moisture}% moisture, {days_stored} days'
+
+# ========== ROUTES ==========
+@app.route('/')
+def index():
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    client_ip = request.remote_addr
+    
+    # Rate limiting
+    if not rate_limit(f'login_{client_ip}', limit=5, window=60):
+        return render_template('login.html', error="Too many login attempts. Try again later.")
+    
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        is_locked, lock_msg = check_account_lockout(username)
+        if is_locked:
+            return render_template('login.html', error=lock_msg)
+        
+        conn = get_db()
+        user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        conn.close()
+        
+        if user and verify_password(password, user['password']):
+            reset_failed_attempts(username)
+            log_activity(user['id'], 'LOGIN_SUCCESS', 'Successful login', client_ip)
+            
+            # Check 2FA
+            conn = get_db()
+            user_2fa = conn.execute("SELECT enabled FROM user_2fa WHERE user_id = ?", (user['id'],)).fetchone()
+            conn.close()
+            
+            session['user_id'] = user['id']
+            session['username'] = user['username']
+            session['role'] = user['role']
+            session['requires_2fa'] = user_2fa and user_2fa['enabled'] if user_2fa else False
+            
+            if session['requires_2fa']:
+                return redirect(url_for('verify_2fa_page'))
+            
+            session.permanent = True
+            return redirect(url_for('dashboard'))
+        else:
+            record_failed_attempt(username)
+            log_activity(0, 'LOGIN_FAILED', f'Failed login for {username}', client_ip)
+            return render_template('login.html', error='Invalid credentials')
+    
+    return render_template('login.html', csrf_token=generate_csrf_token())
+
+@app.route('/verify-2fa', methods=['GET', 'POST'])
+def verify_2fa_page():
+    if 'user_id' not in session or not session.get('requires_2fa', False):
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        code = request.form.get('code')
+        if verify_2fa(session['user_id'], code):
+            session['requires_2fa'] = False
+            session.permanent = True
+            log_activity(session['user_id'], '2FA_SUCCESS', '2FA verification successful', request.remote_addr)
+            return redirect(url_for('dashboard'))
+        else:
+            log_activity(session['user_id'], '2FA_FAILED', 'Invalid 2FA code', request.remote_addr)
+            return render_template('verify_2fa.html', error='Invalid verification code')
+    
+    return render_template('verify_2fa.html')
+
+@app.route('/setup-2fa', methods=['GET', 'POST'])
+@login_required
+def setup_2fa_route():
+    if request.method == 'POST':
+        code = request.form.get('code')
+        if enable_2fa(session['user_id'], code):
+            log_activity(session['user_id'], '2FA_ENABLED', 'Two-factor authentication enabled', request.remote_addr)
+            return redirect(url_for('dashboard'))
+        else:
+            return render_template('setup_2fa.html', error='Invalid code. Please try again.')
+    
+    result = setup_2fa(session['user_id'])
+    return render_template('setup_2fa.html', secret=result['secret'], 
+                          qr_code=result['qr_code'], backup_codes=result['backup_codes'])
+
+@app.route('/disable-2fa', methods=['POST'])
+@login_required
+def disable_2fa_route():
+    disable_2fa(session['user_id'])
+    log_activity(session['user_id'], '2FA_DISABLED', 'Two-factor authentication disabled', request.remote_addr)
+    return redirect(url_for('dashboard'))
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        conn = get_db()
+        user = conn.execute("SELECT username, email FROM users WHERE username = ?", (username,)).fetchone()
+        conn.close()
+        if user:
+            # In production, send email here
+            return render_template('forgot_password.html', message=f"Reset instructions sent to {user['email'] or 'your email'}")
+        else:
+            return render_template('forgot_password.html', error="Username not found.")
+    return render_template('forgot_password.html')
+
+@app.route('/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    if request.method == 'POST':
+        current = request.form.get('current_password')
+        new_pwd = request.form.get('new_password')
+        confirm = request.form.get('confirm_password')
+        
+        if new_pwd != confirm:
+            return render_template('change_password.html', error="Passwords do not match")
+        
+        is_strong, msg = is_strong_password(new_pwd)
+        if not is_strong:
+            return render_template('change_password.html', error=msg)
+        
+        conn = get_db()
+        user = conn.execute("SELECT password FROM users WHERE id = ?", (session['user_id'],)).fetchone()
+        if not verify_password(current, user['password']):
+            conn.close()
+            return render_template('change_password.html', error="Current password is incorrect")
+        
+        conn.execute("UPDATE users SET password = ? WHERE id = ?", (hash_password(new_pwd), session['user_id']))
+        conn.commit()
+        conn.close()
+        
+        log_activity(session['user_id'], 'PASSWORD_CHANGED', 'User changed password', request.remote_addr)
+        return redirect(url_for('dashboard'))
+    
+    return render_template('change_password.html')
+
+@app.route('/logout')
+def logout():
+    if 'user_id' in session:
+        log_activity(session['user_id'], 'LOGOUT', 'User logged out', request.remote_addr)
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    conn = get_db()
+    silos = conn.execute("""
+        SELECT s.*, COALESCE((SELECT moisture FROM grain_batches WHERE silo_id = s.id ORDER BY entry_date DESC LIMIT 1), 0) as moisture
+        FROM silos s WHERE s.status = 'active' ORDER BY s.silo_number
+    """).fetchall()
+    
+    silo_data = []
+    red_count = yellow_count = green_count = 0
+    total_stock = 0
+    
+    for silo in silos:
+        batch = conn.execute("SELECT entry_date FROM grain_batches WHERE silo_id = ? ORDER BY entry_date DESC LIMIT 1", (silo['id'],)).fetchone()
+        days_stored = 0
+        if batch:
+            try:
+                entry = datetime.strptime(batch['entry_date'], '%Y-%m-%d')
+                days_stored = (datetime.now() - entry).days
+            except:
+                pass
+        
+        moisture = silo['moisture'] if silo['moisture'] else 0
+        color, message = calculate_risk(moisture, days_stored)
+        
+        if color == 'red': red_count += 1
+        elif color == 'yellow': yellow_count += 1
+        elif color == 'green': green_count += 1
+        total_stock += silo['current_stock_kg'] or 0
+        
+        silo_data.append({
+            'id': silo['id'], 'number': silo['silo_number'], 'location': silo['location'] or '-',
+            'grain_type': silo['grain_type'] or 'Empty', 'stock': silo['current_stock_kg'] or 0,
+            'capacity': silo['capacity_kg'] or 0, 'moisture': round(moisture, 1) if moisture else '-',
+            'color': color, 'message': message
+        })
+    
+    # Check 2FA status for navbar
+    user_2fa = conn.execute("SELECT enabled FROM user_2fa WHERE user_id = ?", (session['user_id'],)).fetchone()
+    conn.close()
+    
+    return render_template('dashboard.html', silos=silo_data, total_silos=len(silo_data),
+                          total_stock=round(total_stock/1000,1), red_count=red_count,
+                          yellow_count=yellow_count, green_count=green_count,
+                          username=session['username'], role=session['role'],
+                          has_2fa=user_2fa and user_2fa['enabled'] if user_2fa else False)
+
+# Keep all your existing routes (silo, add_silo, remove_silo, farmers, transactions, etc.)
+# ... (add your existing CRUD routes here)
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)

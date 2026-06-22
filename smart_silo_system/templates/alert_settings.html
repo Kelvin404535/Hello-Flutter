@@ -1,0 +1,131 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Alert Settings - Smart Silo System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: Arial, sans-serif; 
+            background-image: url('https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?w=1600');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: -1;
+        }
+        .navbar { 
+            background: rgba(44, 62, 80, 0.9); 
+            color: white; 
+            padding: 15px 30px; 
+            display: flex; 
+            justify-content: space-between; 
+            backdrop-filter: blur(10px);
+        }
+        .container { max-width: 600px; margin: 50px auto; padding: 20px; }
+        .card { 
+            background: rgba(255, 255, 255, 0.15); 
+            backdrop-filter: blur(10px); 
+            border-radius: 15px; 
+            padding: 30px; 
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        h2 { color: white; margin-bottom: 20px; }
+        label { color: white; display: block; margin-bottom: 8px; font-weight: bold; }
+        input { 
+            width: 100%; 
+            padding: 12px; 
+            margin-bottom: 20px; 
+            background: rgba(255,255,255,0.1); 
+            border: 1px solid rgba(255,255,255,0.2); 
+            border-radius: 8px; 
+            color: white;
+            font-size: 14px;
+        }
+        input:focus { outline: none; border-color: #3498db; }
+        button { 
+            background: #2ed573; 
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        button:hover { transform: scale(1.02); background: #26ae60; }
+        .btn-test { background: #3498db; margin-left: 10px; }
+        .btn-test:hover { background: #2980b9; }
+        .info { 
+            margin-top: 20px; 
+            padding: 15px; 
+            background: rgba(0,0,0,0.3); 
+            border-radius: 10px; 
+            color: rgba(255,255,255,0.8);
+            font-size: 13px;
+        }
+        .info ul { margin-left: 20px; margin-top: 10px; }
+        .info li { margin: 5px 0; }
+        .back-link { 
+            display: inline-block; 
+            margin-top: 15px; 
+            color: rgba(255,255,255,0.7); 
+            text-decoration: none;
+        }
+        .back-link:hover { color: white; }
+        .success { 
+            background: rgba(46, 213, 115, 0.3); 
+            border: 1px solid #2ed573; 
+            padding: 10px; 
+            border-radius: 8px; 
+            margin-bottom: 15px;
+            color: #2ed573;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="nav-brand">📧 Alert Settings</div>
+        <a href="/dashboard" style="color: white; text-decoration: none;">← Back to Dashboard</a>
+    </div>
+    <div class="container">
+        <div class="card">
+            <h2>🔔 Notification Settings</h2>
+            
+            {% if message %}
+            <div class="success">{{ message }}</div>
+            {% endif %}
+            
+            <form method="POST">
+                <label>📧 Email Address</label>
+                <input type="email" name="email" value="{{ user.email or '' }}" placeholder="your@email.com">
+                
+                <label>📱 Phone Number (for SMS alerts)</label>
+                <input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="+254700000000">
+                
+                <button type="submit">💾 Save Settings</button>
+                <a href="/send-test-alert" class="btn-test" style="display: inline-block; text-decoration: none;">📨 Send Test Alert</a>
+            </form>
+            
+            <div class="info">
+                <strong>📌 When will you receive alerts?</strong>
+                <ul>
+                    <li>🔴 <strong>CRITICAL:</strong> Moisture > 14% OR Storage > 90 days → Immediate email + SMS</li>
+                    <li>🟡 <strong>WARNING:</strong> Moisture > 12.5% OR Storage > 60 days → Email notification</li>
+                    <li>📊 <strong>Daily Summary:</strong> Every morning at 8:00 AM (if configured)</li>
+                </ul>
+            </div>
+            
+            <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,259 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Transactions - Smart Silo System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        :root {
+            --bg-opacity: 0.55;
+            --glass-opacity: 0.2;
+            --blur-amount: 12px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        body.light {
+            --bg-opacity: 0.3;
+            --glass-opacity: 0.75;
+            color: #1e293b;
+        }
+        
+        body { 
+            background-image: url('https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?w=1600');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+            min-height: 100vh;
+        }
+        
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, var(--bg-opacity));
+            z-index: -1;
+        }
+        
+        body.light::before {
+            background: rgba(255, 255, 255, 0.7);
+        }
+        
+        .theme-toggle {
+            background: rgba(255,255,255,0.15);
+            border: none;
+            border-radius: 30px;
+            padding: 5px 12px;
+            cursor: pointer;
+            color: white;
+            font-size: 14px;
+            backdrop-filter: blur(8px);
+            transition: var(--transition);
+        }
+        
+        .theme-toggle:hover {
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.05);
+        }
+        
+        body.light .theme-toggle {
+            background: rgba(0,0,0,0.1);
+            color: #1e293b;
+        }
+        
+        .navbar { 
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(16px);
+            color: white; 
+            padding: 15px 30px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            flex-wrap: wrap;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        body.light .navbar {
+            background: rgba(255, 255, 255, 0.8);
+            color: #1e293b;
+        }
+        
+        .nav-brand { font-size: 22px; font-weight: bold; }
+        
+        .back-btn {
+            background: rgba(37, 99, 235, 0.85);
+            backdrop-filter: blur(8px);
+            padding: 8px 20px;
+            border-radius: 12px;
+            text-decoration: none;
+            color: white;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .back-btn:hover {
+            background: rgba(37, 99, 235, 1);
+            transform: translateY(-2px);
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+        
+        .page-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 25px;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        body.light .page-title {
+            color: #1e293b;
+            text-shadow: none;
+        }
+        
+        .table-container {
+            background: rgba(255, 255, 255, var(--glass-opacity));
+            backdrop-filter: blur(var(--blur-amount));
+            border-radius: 24px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.25);
+            overflow-x: auto;
+            transition: var(--transition);
+        }
+        
+        .table-container:hover {
+            background: rgba(255, 255, 255, calc(var(--glass-opacity) + 0.03));
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        
+        th {
+            background: rgba(15, 23, 42, 0.85);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            color: #1e293b;
+        }
+        
+        tr:hover td {
+            background: rgba(255, 255, 255, 1);
+        }
+        
+        /* Polymorphic Transaction Badges */
+        .transaction-in {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #10b981;
+            color: white;
+        }
+        
+        .transaction-out {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #ef4444;
+            color: white;
+        }
+        
+        @media (max-width: 768px) {
+            .navbar { flex-direction: column; gap: 15px; text-align: center; }
+            .table-container { padding: 10px; }
+            th, td { padding: 8px 10px; font-size: 12px; }
+            .page-title { font-size: 24px; text-align: center; }
+        }
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: rgba(37, 99, 235, 0.6); border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div class="nav-brand">📦 Stock Transactions</div>
+        <div style="display: flex; gap: 15px; align-items: center;">
+            <button class="theme-toggle" onclick="toggleTheme()">🌓 Dark/Light</button>
+            <a href="/dashboard" class="back-btn">← Back to Dashboard</a>
+        </div>
+    </div>
+    
+    <div class="container">
+        <h1 class="page-title">Transaction History</h1>
+        
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Silo</th>
+                        <th>Batch</th>
+                        <th>Type</th>
+                        <th>Quantity (kg)</th>
+                        <th>Notes</th>
+                        <th>By</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in transactions %}
+                    <tr>
+                        <td>{{ t.transaction_date }}</td>
+                        <td><strong>{{ t.silo_number }}</strong></td>
+                        <td>{{ t.batch_number or '-' }}</td>
+                        <td>
+                            {% if t.transaction_type == 'IN' %}
+                            <span class="transaction-in">IN</span>
+                            {% else %}
+                            <span class="transaction-out">OUT</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ t.quantity_kg }}</td>
+                        <td>{{ t.notes or '-' }}</td>
+                        <td>{{ t.created_by_name or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        function toggleTheme() {
+            document.body.classList.toggle('light');
+            localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+        }
+        
+        if (localStorage.getItem('theme') === 'light') {
+            document.body.classList.add('light');
+        }
+    </script>
+</body>
+</html>
