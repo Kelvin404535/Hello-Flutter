@@ -793,6 +793,9 @@ def init_db():
     conn.close()
 
 init_db()
+@app.route('/google8d9f89a8b245fc66.html')
+def google_verify():
+    return send_file('google8d9f89a8b245fc66.html')
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
