@@ -1003,6 +1003,77 @@ def delete_users():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ========== DELETE FARMER ROUTES ==========
+
+# Single farmer delete
+@app.route('/delete_farmer/<int:farmer_id>', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_farmer(farmer_id):
+    try:
+        conn = get_db()
+        farmer = conn.execute("SELECT * FROM farmers WHERE id = ?", (farmer_id,)).fetchone()
+        if not farmer:
+            conn.close()
+            return jsonify({"success": False, "error": "Farmer not found"}), 404
+        
+        batches = conn.execute("SELECT COUNT(*) as count FROM grain_batches WHERE farmer_id = ?", (farmer_id,)).fetchone()
+        if batches['count'] > 0:
+            conn.close()
+            return jsonify({"success": False, "error": f"Cannot delete farmer with {batches['count']} grain batch(es)"}), 400
+        
+        conn.execute("DELETE FROM farmers WHERE id = ?", (farmer_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": "Farmer deleted successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# Multi-farmer delete
+@app.route('/delete_farmers', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_farmers():
+    try:
+        data = request.get_json()
+        farmer_ids = data.get('farmer_ids', [])
+        if not farmer_ids:
+            return jsonify({"success": False, "error": "No farmer IDs provided"}), 400
+        
+        conn = get_db()
+        deleted_count = 0
+        errors = []
+        
+        for farmer_id in farmer_ids:
+            farmer = conn.execute("SELECT * FROM farmers WHERE id = ?", (farmer_id,)).fetchone()
+            if not farmer:
+                errors.append(f"Farmer ID {farmer_id} not found")
+                continue
+            
+            batches = conn.execute("SELECT COUNT(*) as count FROM grain_batches WHERE farmer_id = ?", (farmer_id,)).fetchone()
+            if batches['count'] > 0:
+                errors.append(f"Farmer '{farmer['name']}' has {batches['count']} batch(es)")
+                continue
+            
+            conn.execute("DELETE FROM farmers WHERE id = ?", (farmer_id,))
+            deleted_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        if errors:
+            return jsonify({
+                "success": True,
+                "deleted": deleted_count,
+                "errors": errors,
+                "message": f"Deleted {deleted_count} farmer(s). Errors: {', '.join(errors)}"
+            })
+        else:
+            return jsonify({"success": True, "message": f"Successfully deleted {deleted_count} farmer(s)"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ========== INIT DATABASE ==========
 def init_db():
     conn = get_db()
@@ -1033,51 +1104,6 @@ def init_db():
     conn.close()
 
 init_db()
-
-    @app.route('/delete_farmers', methods=['DELETE'])
-@login_required
-@admin_required
-def delete_farmers():
-    try:
-        data = request.get_json()
-        farmer_ids = data.get('farmer_ids', [])
-        if not farmer_ids:
-            return jsonify({"success": False, "error": "No farmer IDs provided"}), 400
-        
-        conn = get_db()
-        deleted_count = 0
-        errors = []
-        
-        for farmer_id in farmer_ids:
-            farmer = conn.execute("SELECT * FROM farmers WHERE id = ?", (farmer_id,)).fetchone()
-            if not farmer:
-                errors.append(f"Farmer ID {farmer_id} not found")
-                continue
-            
-            # Check if farmer has grain batches
-            batches = conn.execute("SELECT COUNT(*) as count FROM grain_batches WHERE farmer_id = ?", (farmer_id,)).fetchone()
-            if batches['count'] > 0:
-                errors.append(f"Farmer '{farmer['name']}' has {batches['count']} batch(es). Cannot delete.")
-                continue
-            
-            conn.execute("DELETE FROM farmers WHERE id = ?", (farmer_id,))
-            deleted_count += 1
-        
-        conn.commit()
-        conn.close()
-        
-        if errors:
-            return jsonify({
-                "success": True,
-                "deleted": deleted_count,
-                "errors": errors,
-                "message": f"Deleted {deleted_count} farmer(s). Errors: {', '.join(errors)}"
-            })
-        else:
-            return jsonify({"success": True, "message": f"Successfully deleted {deleted_count} farmer(s)"})
-    
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
