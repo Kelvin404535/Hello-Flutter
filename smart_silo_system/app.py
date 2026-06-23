@@ -1033,6 +1033,31 @@ def init_db():
     conn.close()
 
 init_db()
+@app.route('/delete_farmer/<int:farmer_id>', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_farmer(farmer_id):
+    try:
+        conn = get_db()
+        
+        farmer = conn.execute("SELECT * FROM farmers WHERE id = ?", (farmer_id,)).fetchone()
+        if not farmer:
+            conn.close()
+            return jsonify({"success": False, "error": "Farmer not found"}), 404
+        
+        batches = conn.execute("SELECT COUNT(*) as count FROM grain_batches WHERE farmer_id = ?", (farmer_id,)).fetchone()
+        if batches['count'] > 0:
+            conn.close()
+            return jsonify({"success": False, "error": f"Cannot delete farmer with {batches['count']} grain batch(es)."}), 400
+        
+        conn.execute("DELETE FROM farmers WHERE id = ?", (farmer_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": "Farmer deleted successfully"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
