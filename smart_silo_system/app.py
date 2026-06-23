@@ -793,12 +793,19 @@ def init_db():
     conn.close()
 
 init_db()
+
+# ========== VERIFICATION ROUTES ==========
 @app.route('/google8d9f89a8b245fc66.html')
 def google_verify():
     return send_file('google8d9f89a8b245fc66.html')
+
 @app.route('/sitemap.xml')
 def sitemap():
     return send_file('sitemap.xml')
+
+# ========== DELETE USER ROUTES ==========
+
+# Single user delete
 @app.route('/delete_user/<int:user_id>', methods=['DELETE'])
 @login_required
 @admin_required
@@ -821,6 +828,56 @@ def delete_user(user_id):
         conn.commit()
         conn.close()
         return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# Multi-user delete
+@app.route('/delete_users', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_users():
+    try:
+        data = request.get_json()
+        user_ids = data.get('user_ids', [])
+        if not user_ids:
+            return jsonify({"success": False, "error": "No user IDs provided"}), 400
+        
+        conn = get_db()
+        deleted_count = 0
+        errors = []
+        
+        for user_id in user_ids:
+            user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not user:
+                errors.append(f"User ID {user_id} not found")
+                continue
+            
+            if user_id == session['user_id']:
+                errors.append(f"Cannot delete your own account (ID: {user_id})")
+                continue
+            
+            if user['role'] == 'admin':
+                admin_count = conn.execute("SELECT COUNT(*) as count FROM users WHERE role = 'admin'").fetchone()
+                if admin_count['count'] <= 1:
+                    errors.append(f"Cannot delete the last admin user (ID: {user_id})")
+                    continue
+            
+            conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+            deleted_count += 1
+        
+        conn.commit()
+        conn.close()
+        
+        if errors:
+            return jsonify({
+                "success": True,
+                "deleted": deleted_count,
+                "errors": errors,
+                "message": f"Deleted {deleted_count} user(s). Errors: {', '.join(errors)}"
+            })
+        else:
+            return jsonify({"success": True, "message": f"Successfully deleted {deleted_count} user(s)"})
+    
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
