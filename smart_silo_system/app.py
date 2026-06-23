@@ -796,6 +796,9 @@ init_db()
 @app.route('/google8d9f89a8b245fc66.html')
 def google_verify():
     return send_file('google8d9f89a8b245fc66.html')
+@app.route('/sitemap.xml')
+def sitemap():
+    return send_file('sitemap.xml')
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
