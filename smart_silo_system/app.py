@@ -1074,6 +1074,52 @@ def delete_farmers():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+# ========== CLEAR TRANSACTIONS ROUTES ==========
+
+@app.route('/clear_transactions', methods=['DELETE'])
+@login_required
+@admin_required
+def clear_transactions():
+    """Delete selected transactions"""
+    try:
+        data = request.get_json()
+        transaction_ids = data.get('transaction_ids', [])
+        if not transaction_ids:
+            return jsonify({"success": False, "error": "No transaction IDs provided"}), 400
+        
+        conn = get_db()
+        deleted_count = 0
+        placeholders = ','.join(['?'] * len(transaction_ids))
+        conn.execute(f"DELETE FROM transactions WHERE id IN ({placeholders})", transaction_ids)
+        deleted_count = conn.total_changes
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": f"Deleted {deleted_count} transaction(s)"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/clear_all_transactions', methods=['DELETE'])
+@login_required
+@admin_required
+def clear_all_transactions():
+    """Delete ALL transactions"""
+    try:
+        conn = get_db()
+        # Get count before deletion
+        count = conn.execute("SELECT COUNT(*) as count FROM transactions").fetchone()
+        total = count['count'] if count else 0
+        
+        conn.execute("DELETE FROM transactions")
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"success": True, "message": f"Deleted all {total} transactions"})
+    
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
 # ========== INIT DATABASE ==========
 def init_db():
     conn = get_db()
