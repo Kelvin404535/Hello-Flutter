@@ -128,7 +128,7 @@
             text-shadow: none;
         }
         
-        /* Glass Button */
+        /* Glass Buttons */
         .btn-add {
             background: rgba(16, 185, 129, 0.85);
             backdrop-filter: blur(8px);
@@ -151,7 +151,36 @@
             box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
         }
         
-        /* Delete Button */
+        .btn-delete-selected {
+            background: rgba(239, 68, 68, 0.85);
+            backdrop-filter: blur(8px);
+            padding: 12px 24px;
+            border: none;
+            border-radius: 14px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-bottom: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 10px;
+        }
+        
+        .btn-delete-selected:hover {
+            background: rgba(239, 68, 68, 1);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+        }
+        
+        .btn-delete-selected:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* Single Delete Button */
         .btn-delete {
             background: rgba(239, 68, 68, 0.85);
             backdrop-filter: blur(8px);
@@ -222,6 +251,14 @@
             font-weight: 600;
             background: #2563eb;
             color: white;
+        }
+        
+        /* Checkbox */
+        .farmer-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #2563eb;
         }
         
         /* Polymorphic Glass Modal */
@@ -325,7 +362,7 @@
             .stats-summary { grid-template-columns: repeat(2, 1fr); }
             .table-container { padding: 10px; }
             th, td { padding: 8px 10px; font-size: 12px; }
-            .btn-add { width: 100%; justify-content: center; }
+            .btn-add, .btn-delete-selected { width: 100%; justify-content: center; margin-left: 0; }
             .page-title { font-size: 24px; text-align: center; }
         }
         
@@ -362,12 +399,21 @@
             </div>
         </div>
         
-        <button class="btn-add" onclick="showModal()">➕ Add New Farmer</button>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <button class="btn-add" onclick="showModal()">➕ Add New Farmer</button>
+            <button id="deleteSelectedBtn" class="btn-delete-selected" disabled onclick="deleteSelected()">
+                🗑️ Delete Selected
+            </button>
+            <span id="selectedCount" style="color: white; background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 10px; font-size: 14px;">
+                0 selected
+            </span>
+        </div>
         
         <div class="table-container">
             <table>
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="selectAll" onchange="toggleAllCheckboxes()"></th>
                         <th>Farmer #</th>
                         <th>Name</th>
                         <th>Phone</th>
@@ -380,6 +426,7 @@
                 <tbody>
                     {% for farmer in farmers %}
                     <tr>
+                        <td><input type="checkbox" class="farmer-checkbox" value="{{ farmer.id }}" onchange="updateDeleteButton()"></td>
                         <td><strong>{{ farmer.farmer_number }}</strong></td>
                         <td>{{ farmer.name }}</td>
                         <td>{{ farmer.phone or '-' }}</td>
@@ -439,7 +486,7 @@
             }).then(() => location.reload());
         }
         
-        // ========== DELETE FARMER FUNCTION ==========
+        // ========== SINGLE DELETE ==========
         function deleteFarmer(farmerId) {
             if (!confirm('Are you sure you want to delete this farmer? This action cannot be undone!')) {
                 return;
@@ -459,6 +506,56 @@
             })
             .catch(error => {
                 alert('❌ Error deleting farmer: ' + error);
+            });
+        }
+        
+        // ========== MULTI-SELECT DELETE ==========
+        function toggleAllCheckboxes() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.farmer-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateDeleteButton();
+        }
+        
+        function updateDeleteButton() {
+            const checked = document.querySelectorAll('.farmer-checkbox:checked');
+            const btn = document.getElementById('deleteSelectedBtn');
+            const count = document.getElementById('selectedCount');
+            count.textContent = checked.length + ' selected';
+            if (checked.length === 0) {
+                btn.disabled = true;
+            } else {
+                btn.disabled = false;
+            }
+        }
+        
+        function deleteSelected() {
+            const checkboxes = document.querySelectorAll('.farmer-checkbox:checked');
+            if (checkboxes.length === 0) {
+                alert('No farmers selected.');
+                return;
+            }
+            
+            const farmerIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            const confirmMsg = `Are you sure you want to delete ${farmerIds.length} farmer(s)? This action cannot be undone!`;
+            if (!confirm(confirmMsg)) return;
+            
+            fetch('/delete_farmers', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ farmer_ids: farmerIds })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message || 'Farmers deleted successfully!');
+                    location.reload();
+                } else {
+                    alert('❌ Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('❌ Error deleting farmers: ' + error);
             });
         }
         

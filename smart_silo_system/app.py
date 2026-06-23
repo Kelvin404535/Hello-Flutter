@@ -1033,28 +1033,48 @@ def init_db():
     conn.close()
 
 init_db()
-@app.route('/delete_farmer/<int:farmer_id>', methods=['DELETE'])
+
+    @app.route('/delete_farmers', methods=['DELETE'])
 @login_required
 @admin_required
-def delete_farmer(farmer_id):
+def delete_farmers():
     try:
+        data = request.get_json()
+        farmer_ids = data.get('farmer_ids', [])
+        if not farmer_ids:
+            return jsonify({"success": False, "error": "No farmer IDs provided"}), 400
+        
         conn = get_db()
+        deleted_count = 0
+        errors = []
         
-        farmer = conn.execute("SELECT * FROM farmers WHERE id = ?", (farmer_id,)).fetchone()
-        if not farmer:
-            conn.close()
-            return jsonify({"success": False, "error": "Farmer not found"}), 404
+        for farmer_id in farmer_ids:
+            farmer = conn.execute("SELECT * FROM farmers WHERE id = ?", (farmer_id,)).fetchone()
+            if not farmer:
+                errors.append(f"Farmer ID {farmer_id} not found")
+                continue
+            
+            # Check if farmer has grain batches
+            batches = conn.execute("SELECT COUNT(*) as count FROM grain_batches WHERE farmer_id = ?", (farmer_id,)).fetchone()
+            if batches['count'] > 0:
+                errors.append(f"Farmer '{farmer['name']}' has {batches['count']} batch(es). Cannot delete.")
+                continue
+            
+            conn.execute("DELETE FROM farmers WHERE id = ?", (farmer_id,))
+            deleted_count += 1
         
-        batches = conn.execute("SELECT COUNT(*) as count FROM grain_batches WHERE farmer_id = ?", (farmer_id,)).fetchone()
-        if batches['count'] > 0:
-            conn.close()
-            return jsonify({"success": False, "error": f"Cannot delete farmer with {batches['count']} grain batch(es)."}), 400
-        
-        conn.execute("DELETE FROM farmers WHERE id = ?", (farmer_id,))
         conn.commit()
         conn.close()
         
-        return jsonify({"success": True, "message": "Farmer deleted successfully"})
+        if errors:
+            return jsonify({
+                "success": True,
+                "deleted": deleted_count,
+                "errors": errors,
+                "message": f"Deleted {deleted_count} farmer(s). Errors: {', '.join(errors)}"
+            })
+        else:
+            return jsonify({"success": True, "message": f"Successfully deleted {deleted_count} farmer(s)"})
     
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
