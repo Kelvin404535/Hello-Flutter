@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recycle Bin - Smart Silo System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body {
+            background: #0f172a;
+            color: white;
+            min-height: 100vh;
+        }
+        .navbar {
+            background: rgba(15, 23, 42, 0.9);
+            padding: 15px 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .navbar h1 { font-size: 24px; }
+        .back-btn {
+            color: #60a5fa;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid #60a5fa;
+        }
+        .back-btn:hover {
+            background: #60a5fa;
+            color: white;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn-restore {
+            background: #22c55e;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .btn-restore:hover { background: #16a34a; }
+        .btn-permanent {
+            background: #ef4444;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .btn-permanent:hover { background: #dc2626; }
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        .btn-primary:hover { background: #2563eb; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th {
+            background: rgba(30, 41, 59, 0.8);
+            padding: 12px;
+            text-align: left;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .empty {
+            text-align: center;
+            padding: 50px;
+            color: #94a3b8;
+        }
+        .badge {
+            background: #f59e0b;
+            color: #1e293b;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        .actions-cell {
+            display: flex;
+            gap: 8px;
+        }
+        @media (max-width: 768px) {
+            .navbar { flex-direction: column; gap: 10px; text-align: center; }
+            .header { flex-direction: column; gap: 10px; }
+            .actions-cell { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🗑️ Recycle Bin</h1>
+        <a href="/dashboard" class="back-btn">← Back to Dashboard</a>
+    </div>
+    
+    <div class="container">
+        <div class="header">
+            <h2>Deleted Silos</h2>
+            <div class="actions">
+                <button onclick="autoDeleteOld()" class="btn-primary">Auto-Delete Old (>30 days)</button>
+                <button onclick="emptyRecycleBin()" class="btn-permanent">🗑️ Empty Bin</button>
+            </div>
+        </div>
+        
+        {% if silos %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Silo Number</th>
+                    <th>Location</th>
+                    <th>Grain Type</th>
+                    <th>Stock</th>
+                    <th>Deleted By</th>
+                    <th>Deleted At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for silo in silos %}
+                <tr>
+                    <td><strong>{{ silo.silo_number }}</strong></td>
+                    <td>{{ silo.location or '-' }}</td>
+                    <td>{{ silo.grain_type or '-' }}</td>
+                    <td>{{ silo.current_stock_kg or 0 }} kg</td>
+                    <td>{{ silo.deleted_by_name or 'Unknown' }}</td>
+                    <td>{{ silo.deleted_at[:10] if silo.deleted_at else '-' }}</td>
+                    <td>
+                        <div class="actions-cell">
+                            <button onclick="restoreSilo({{ silo.id }})" class="btn-restore">↩️ Restore</button>
+                            <button onclick="permanentDelete({{ silo.id }})" class="btn-permanent">🗑️ Delete</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty">
+            <p>🔄 Recycle bin is empty</p>
+            <p style="font-size: 14px;">Deleted silos will appear here.</p>
+        </div>
+        {% endif %}
+    </div>
+    
+    <script>
+        function restoreSilo(siloId) {
+            if (!confirm('Restore this silo?')) return;
+            fetch('/silo/' + siloId + '/restore', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ Silo restored!');
+                        location.reload();
+                    } else {
+                        alert('❌ Error: ' + data.error);
+                    }
+                });
+        }
+        
+        function permanentDelete(siloId) {
+            if (!confirm('⚠️ Permanently delete this silo? This cannot be undone!')) return;
+            fetch('/silo/' + siloId + '/permanent_delete', { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ Silo permanently deleted!');
+                        location.reload();
+                    } else {
+                        alert('❌ Error: ' + data.error);
+                    }
+                });
+        }
+        
+        function emptyRecycleBin() {
+            if (!confirm('⚠️ Empty the entire recycle bin? This cannot be undone!')) return;
+            fetch('/recycle-bin/empty', { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ ' + data.message);
+                        location.reload();
+                    } else {
+                        alert('❌ Error: ' + data.error);
+                    }
+                });
+        }
+        
+        function autoDeleteOld() {
+            if (!confirm('Auto-delete silos older than 30 days?')) return;
+            fetch('/recycle-bin/auto-delete', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ ' + data.message);
+                        location.reload();
+                    } else {
+                        alert('❌ Error: ' + data.error);
+                    }
+                });
+        }
+    </script>
+</body>
+</html>

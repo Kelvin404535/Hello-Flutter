@@ -140,7 +140,7 @@
             text-shadow: none;
         }
         
-        /* ========== GLASS BUTTON ========== */
+        /* ========== BUTTONS ========== */
         .btn-add {
             background: rgba(16, 185, 129, 0.85);
             backdrop-filter: blur(8px);
@@ -162,6 +162,36 @@
             background: rgba(16, 185, 129, 1);
             transform: translateY(-2px) scale(1.02);
             box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
+        }
+        
+        .btn-delete-selected {
+            background: rgba(239, 68, 68, 0.85);
+            backdrop-filter: blur(8px);
+            padding: 12px 24px;
+            border: none;
+            border-radius: 14px;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 10px;
+        }
+        
+        .btn-delete-selected:hover {
+            background: rgba(239, 68, 68, 1);
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
+        }
+        
+        .btn-delete-selected:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
         
         /* ========== GLASS TABLE CONTAINER ========== */
@@ -232,7 +262,7 @@
         .role-staff { background: #10b981; color: white; }
         .role-farmer { background: #f59e0b; color: white; }
         
-        /* Delete Button */
+        /* Delete Button (single) */
         .btn-delete {
             background: rgba(239, 68, 68, 0.85);
             backdrop-filter: blur(8px);
@@ -250,6 +280,14 @@
             background: rgba(239, 68, 68, 1);
             transform: scale(1.05);
             box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
+        
+        /* Checkbox styling */
+        .user-checkbox {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #2563eb;
         }
         
         /* ========== GLASS MODAL ========== */
@@ -357,15 +395,6 @@
             background: rgba(100, 116, 139, 1);
         }
         
-        /* ========== USER BADGE ========== */
-        .user-badge { 
-            background: rgba(30, 41, 59, 0.7); 
-            padding: 8px 16px; 
-            border-radius: 14px; 
-            backdrop-filter: blur(8px); 
-            font-weight: 500;
-        }
-        
         /* ========== RESPONSIVE ========== */
         @media (max-width: 768px) {
             .navbar {
@@ -383,10 +412,11 @@
                 font-size: 12px;
             }
             
-            .btn-add {
+            .btn-add, .btn-delete-selected {
                 width: 100%;
                 text-align: center;
                 justify-content: center;
+                margin-left: 0;
             }
             
             .page-title {
@@ -414,12 +444,21 @@
     <div class="container">
         <h1 class="page-title">User Management</h1>
         
-        <button class="btn-add" onclick="showModal()">➕ Add New User</button>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <button class="btn-add" onclick="showModal()">➕ Add New User</button>
+            <button id="deleteSelectedBtn" class="btn-delete-selected" disabled onclick="deleteSelected()">
+                🗑️ Delete Selected
+            </button>
+            <span id="selectedCount" style="color: white; background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 10px; font-size: 14px;">
+                0 selected
+            </span>
+        </div>
         
         <div class="table-container">
             <table>
                 <thead>
                     <tr>
+                        <th><input type="checkbox" id="selectAll" onchange="toggleAllCheckboxes()"></th>
                         <th>Username</th>
                         <th>Full Name</th>
                         <th>Email</th>
@@ -431,6 +470,7 @@
                 <tbody>
                     {% for user in users %}
                     <tr>
+                        <td><input type="checkbox" class="user-checkbox" value="{{ user.id }}" onchange="updateDeleteButton()"></td>
                         <td><strong>{{ user.username }}</strong></td>
                         <td>{{ user.full_name or '-' }}</td>
                         <td>{{ user.email or '-' }}</td>
@@ -526,7 +566,7 @@
               });
         }
         
-        // ========== DELETE USER FUNCTION ==========
+        // ========== DELETE SINGLE USER ==========
         function deleteUser(userId) {
             if (confirm('Are you sure you want to delete this user? This action cannot be undone!')) {
                 fetch('/delete_user/' + userId, {
@@ -545,6 +585,56 @@
                     alert('Error deleting user: ' + error);
                 });
             }
+        }
+        
+        // ========== MULTI-SELECT DELETE ==========
+        function toggleAllCheckboxes() {
+            const selectAll = document.getElementById('selectAll');
+            const checkboxes = document.querySelectorAll('.user-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAll.checked);
+            updateDeleteButton();
+        }
+        
+        function updateDeleteButton() {
+            const checked = document.querySelectorAll('.user-checkbox:checked');
+            const btn = document.getElementById('deleteSelectedBtn');
+            const count = document.getElementById('selectedCount');
+            count.textContent = checked.length + ' selected';
+            if (checked.length === 0) {
+                btn.disabled = true;
+            } else {
+                btn.disabled = false;
+            }
+        }
+        
+        function deleteSelected() {
+            const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+            if (checkboxes.length === 0) {
+                alert('No users selected.');
+                return;
+            }
+            
+            const userIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+            const confirmMsg = `Are you sure you want to delete ${userIds.length} user(s)? This action cannot be undone!`;
+            if (!confirm(confirmMsg)) return;
+            
+            fetch('/delete_users', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_ids: userIds })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message || 'Users deleted successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error deleting users: ' + error);
+            });
         }
         
         // Close modal when clicking outside

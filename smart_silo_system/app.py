@@ -25,7 +25,7 @@ app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USE_SSL'] = False
 app.config['MAIL_USERNAME'] = 'kk3478787@gmail.com'
-app.config['MAIL_PASSWORD'] = 'jlchktqssypctods'  # App Password
+app.config['MAIL_PASSWORD'] = 'jlchktqssypctods'
 app.config['MAIL_DEFAULT_SENDER'] = 'kk3478787@gmail.com'
 app.config['MAIL_DEBUG'] = True
 
@@ -150,7 +150,6 @@ def calculate_risk(moisture, days_stored):
 
 # ========== ALERT FUNCTIONS ==========
 def save_alert_to_db(silo_id, alert_type, severity, message):
-    """Save alert to database"""
     try:
         conn = get_db()
         conn.execute("INSERT INTO alerts (silo_id, alert_type, severity, message, is_read) VALUES (?, ?, ?, ?, 0)", 
@@ -162,7 +161,6 @@ def save_alert_to_db(silo_id, alert_type, severity, message):
         print(f"❌ Alert save error: {e}")
 
 def check_and_send_alerts():
-    """Check all silos and create alerts for high-risk batches"""
     print("🔍 Checking silos for risks...")
     try:
         conn = get_db()
@@ -350,7 +348,6 @@ def approve_user(user_id):
         conn.close()
         return redirect(url_for('admin_pending_users'))
     
-    # Auto-generate worker number
     last = conn.execute("SELECT username FROM users WHERE username LIKE 'WK-%' ORDER BY id DESC LIMIT 1").fetchone()
     if last:
         num = int(last['username'].split('-')[1]) + 1
@@ -358,12 +355,10 @@ def approve_user(user_id):
     else:
         worker_number = "WK-0001"
     
-    # Generate random password
     characters = string.ascii_letters + string.digits + "!@#$%^&*"
     temp_password = ''.join(random.choice(characters) for _ in range(12))
     hashed_password = hash_password(temp_password)
     
-    # Insert into users table
     conn.execute("""
         INSERT INTO users (username, password, email, phone, full_name, role)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -372,7 +367,6 @@ def approve_user(user_id):
     conn.execute("UPDATE pending_users SET status = 'approved' WHERE id = ?", (user_id,))
     conn.commit()
     
-    # Send email with credentials
     email_sent = False
     email_error = None
     
@@ -500,8 +494,11 @@ def dashboard():
     check_and_send_alerts()
     conn = get_db()
     silos = conn.execute("""
-        SELECT s.*, COALESCE((SELECT moisture FROM grain_batches WHERE silo_id = s.id ORDER BY entry_date DESC LIMIT 1), 0) as moisture
-        FROM silos s WHERE s.status = 'active' ORDER BY s.silo_number
+        SELECT s.*, 
+               COALESCE((SELECT moisture FROM grain_batches WHERE silo_id = s.id ORDER BY entry_date DESC LIMIT 1), 0) as moisture
+        FROM silos s 
+        WHERE s.status = 'active' 
+        ORDER BY s.silo_number
     """).fetchall()
     
     silo_data = []
@@ -533,11 +530,16 @@ def dashboard():
             'color': color, 'message': message
         })
     
+    # Get recycle bin count
+    recycle_count = conn.execute("SELECT COUNT(*) as count FROM silos WHERE status = 'deleted'").fetchone()
+    recycle_count = recycle_count['count'] if recycle_count else 0
+    
     conn.close()
     return render_template('dashboard.html', silos=silo_data, total_silos=len(silo_data),
                           total_stock=round(total_stock/1000, 1), red_count=red_count,
                           yellow_count=yellow_count, green_count=green_count,
-                          username=session['username'], role=session['role'])
+                          username=session['username'], role=session['role'],
+                          recycle_count=recycle_count)
 
 @app.route('/silo/<int:silo_id>', methods=['GET', 'POST'])
 @login_required
@@ -774,25 +776,147 @@ def analytics():
     conn.close()
     return render_template('analytics.html', trends=trends, risk_counts=risk_counts)
 
-# Create pending_users table if not exists
-def init_db():
-    conn = get_db()
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS pending_users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            full_name TEXT,
-            email TEXT,
-            phone TEXT,
-            preferred_username TEXT,
-            requested_role TEXT,
-            status TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# ========== RECYCLE BIN ROUTES ==========
 
-init_db()
+@app.route('/silo/<int:silo_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def soft_delete_silo(silo_id):
+    """Move silo to recycle bin"""
+    try:
+        conn = get_db()
+        silo = conn.execute("SELECT * FROM silos WHERE id = ? AND status = 'active'", (silo_id,)).fetchone()
+        if not silo:
+            conn.close()
+            return jsonify({"success": False, "error": "Silo not found"}), 404
+        
+        if silo['current_stock_kg'] > 0:
+            conn.close()
+            return jsonify({"success": False, "error": "Cannot delete silo with stock. Remove stock first."}), 400
+        
+        conn.execute("""
+            UPDATE silos 
+            SET status = 'deleted', 
+                deleted_at = datetime('now'),
+                deleted_by = ?
+            WHERE id = ?
+        """, (session['user_id'], silo_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": "Silo moved to recycle bin"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/silo/<int:silo_id>/restore', methods=['POST'])
+@login_required
+@admin_required
+def restore_silo(silo_id):
+    """Restore silo from recycle bin"""
+    try:
+        conn = get_db()
+        silo = conn.execute("SELECT * FROM silos WHERE id = ? AND status = 'deleted'", (silo_id,)).fetchone()
+        if not silo:
+            conn.close()
+            return jsonify({"success": False, "error": "Silo not found in recycle bin"}), 404
+        
+        conn.execute("""
+            UPDATE silos 
+            SET status = 'active', 
+                deleted_at = NULL,
+                deleted_by = NULL
+            WHERE id = ?
+        """, (silo_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": "Silo restored successfully"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/recycle-bin')
+@login_required
+@admin_required
+def recycle_bin():
+    """View all deleted silos"""
+    conn = get_db()
+    deleted_silos = conn.execute("""
+        SELECT s.*, u.username as deleted_by_name
+        FROM silos s
+        LEFT JOIN users u ON s.deleted_by = u.id
+        WHERE s.status = 'deleted'
+        ORDER BY s.deleted_at DESC
+    """).fetchall()
+    conn.close()
+    return render_template('recycle_bin.html', silos=deleted_silos)
+
+@app.route('/silo/<int:silo_id>/permanent_delete', methods=['DELETE'])
+@login_required
+@admin_required
+def permanent_delete_silo(silo_id):
+    """Permanently delete silo from database"""
+    try:
+        conn = get_db()
+        silo = conn.execute("SELECT * FROM silos WHERE id = ? AND status = 'deleted'", (silo_id,)).fetchone()
+        if not silo:
+            conn.close()
+            return jsonify({"success": False, "error": "Silo not found in recycle bin"}), 404
+        
+        # Delete related records
+        conn.execute("DELETE FROM grain_batches WHERE silo_id = ?", (silo_id,))
+        conn.execute("DELETE FROM transactions WHERE silo_id = ?", (silo_id,))
+        conn.execute("DELETE FROM alerts WHERE silo_id = ?", (silo_id,))
+        conn.execute("DELETE FROM silos WHERE id = ?", (silo_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": "Silo permanently deleted"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/recycle-bin/empty', methods=['DELETE'])
+@login_required
+@admin_required
+def empty_recycle_bin():
+    """Empty the entire recycle bin"""
+    try:
+        conn = get_db()
+        deleted = conn.execute("SELECT id FROM silos WHERE status = 'deleted'").fetchall()
+        count = len(deleted)
+        for silo in deleted:
+            conn.execute("DELETE FROM grain_batches WHERE silo_id = ?", (silo['id'],))
+            conn.execute("DELETE FROM transactions WHERE silo_id = ?", (silo['id'],))
+            conn.execute("DELETE FROM alerts WHERE silo_id = ?", (silo['id'],))
+            conn.execute("DELETE FROM silos WHERE id = ?", (silo['id'],))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": f"Permanently deleted {count} silos"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/recycle-bin/auto-delete', methods=['POST'])
+@login_required
+@admin_required
+def auto_delete_old():
+    """Auto-delete silos older than 30 days"""
+    try:
+        conn = get_db()
+        old = conn.execute("""
+            SELECT id FROM silos 
+            WHERE status = 'deleted' 
+            AND deleted_at < datetime('now', '-30 days')
+        """).fetchall()
+        
+        count = 0
+        for silo in old:
+            conn.execute("DELETE FROM grain_batches WHERE silo_id = ?", (silo['id'],))
+            conn.execute("DELETE FROM transactions WHERE silo_id = ?", (silo['id'],))
+            conn.execute("DELETE FROM alerts WHERE silo_id = ?", (silo['id'],))
+            conn.execute("DELETE FROM silos WHERE id = ?", (silo['id'],))
+            count += 1
+        
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "message": f"Auto-deleted {count} old silos"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # ========== VERIFICATION ROUTES ==========
 @app.route('/google8d9f89a8b245fc66.html')
@@ -805,7 +929,6 @@ def sitemap():
 
 # ========== DELETE USER ROUTES ==========
 
-# Single user delete
 @app.route('/delete_user/<int:user_id>', methods=['DELETE'])
 @login_required
 @admin_required
@@ -831,7 +954,6 @@ def delete_user(user_id):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-# Multi-user delete
 @app.route('/delete_users', methods=['DELETE'])
 @login_required
 @admin_required
@@ -880,6 +1002,37 @@ def delete_users():
     
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+# ========== INIT DATABASE ==========
+def init_db():
+    conn = get_db()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pending_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT,
+            email TEXT,
+            phone TEXT,
+            preferred_username TEXT,
+            requested_role TEXT,
+            status TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Add deleted_at and deleted_by columns to silos if not exist
+    try:
+        conn.execute("ALTER TABLE silos ADD COLUMN deleted_at TIMESTAMP")
+    except:
+        pass
+    try:
+        conn.execute("ALTER TABLE silos ADD COLUMN deleted_by INTEGER")
+    except:
+        pass
+    
+    conn.commit()
+    conn.close()
+
+init_db()
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
