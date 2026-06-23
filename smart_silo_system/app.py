@@ -799,6 +799,30 @@ def google_verify():
 @app.route('/sitemap.xml')
 def sitemap():
     return send_file('sitemap.xml')
+@app.route('/delete_user/<int:user_id>', methods=['DELETE'])
+@login_required
+@admin_required
+def delete_user(user_id):
+    try:
+        conn = get_db()
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            conn.close()
+            return jsonify({"success": False, "error": "User not found"}), 404
+        if user_id == session['user_id']:
+            conn.close()
+            return jsonify({"success": False, "error": "Cannot delete yourself"}), 403
+        if user['role'] == 'admin':
+            admin_count = conn.execute("SELECT COUNT(*) as count FROM users WHERE role = 'admin'").fetchone()
+            if admin_count['count'] <= 1:
+                conn.close()
+                return jsonify({"success": False, "error": "Cannot delete last admin"}), 403
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
